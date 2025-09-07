@@ -49,8 +49,10 @@ DWORD WINAPI HookedXInputGetState(DWORD dwUserIndex, XINPUT_STATE* pState) {
     
     DWORD result = TrueXInputGetState(dwUserIndex, pState);
     
-    if (result == ERROR_DEVICE_NOT_CONNECTED && g_enableAutoController && dwUserIndex == 0) {
-        sprintf_s(logBuffer, "Simulating controller %d - Frame %d", dwUserIndex, g_frameCounter);
+    // Force simulation mode - always override with simulated input
+    if (g_enableAutoController && dwUserIndex == 0) {
+        sprintf_s(logBuffer, "Force simulating controller %d - Frame %d (Real controller: %s)", 
+                 dwUserIndex, g_frameCounter, (result == ERROR_SUCCESS) ? "Connected" : "Not connected");
         LogMessage(logBuffer);
         
         ZeroMemory(pState, sizeof(XINPUT_STATE));
@@ -58,9 +60,9 @@ DWORD WINAPI HookedXInputGetState(DWORD dwUserIndex, XINPUT_STATE* pState) {
         
         GenerateCircularStickMovement(pState->Gamepad);
         
-        if ((g_frameCounter / 120) % 2 == 0) {
-            pState->Gamepad.wButtons |= XINPUT_GAMEPAD_A;
-        }
+        // if ((g_frameCounter / 120) % 2 == 0) {
+        //     pState->Gamepad.wButtons |= XINPUT_GAMEPAD_A;
+        // }
         
         g_frameCounter++;
         return ERROR_SUCCESS;
@@ -70,10 +72,10 @@ DWORD WINAPI HookedXInputGetState(DWORD dwUserIndex, XINPUT_STATE* pState) {
         sprintf_s(logBuffer, "Real controller %d detected, enhancing input - Frame %d", dwUserIndex, g_frameCounter);
         LogMessage(logBuffer);
         
-        // Add enhancement to existing controller input
+        // Add stronger enhancement to existing controller input
         float angle = g_frameCounter * g_rotationSpeed * 0.5f;
-        float enhanceX = cos(angle) * 0.3f;
-        float enhanceY = sin(angle) * 0.3f;
+        float enhanceX = cos(angle) * 0.8f;  // Increased from 0.3f to 0.8f
+        float enhanceY = sin(angle) * 0.8f;  // Increased from 0.3f to 0.8f
         
         int newLX = pState->Gamepad.sThumbLX + FloatToStick(enhanceX);
         int newLY = pState->Gamepad.sThumbLY + FloatToStick(enhanceY);
