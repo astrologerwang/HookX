@@ -76,7 +76,7 @@ int main() {
     fmt::print("This tool injects a hook DLL into Elden Ring to provide automatic controller input.\n\n");
     
     // Create temp directory for logs
-    CreateDirectoryA("C:\\temp", NULL);
+    CreateDirectoryA("D:\\temp", NULL);
     
     // Get the current executable directory
     char exePath[MAX_PATH];
@@ -129,7 +129,7 @@ int main() {
         fmt::print("1. Simulate a controller if none is connected\n");
         fmt::print("2. Enhance real controller input if one is connected\n");
         fmt::print("3. Generate circular stick movements automatically\n\n");
-        fmt::print("Check C:\\temp\\hookx_log.txt for hook activity.\n\n");
+        fmt::print("Check D:\\temp\\hookx_log.txt for hook activity.\n\n");
         fmt::print("Press Enter to exit (this will NOT remove the hook)...\n");
     } else {
         fmt::print("ERROR: Failed to inject DLL into Elden Ring!\n");
