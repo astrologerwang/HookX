@@ -30,9 +30,6 @@ target_link_libraries(hook_dll PRIVATE
     xinput
 )
 
-# Broadcast message sender (test application)
-add_executable(BroadcastSender broadcast_sender.cpp)
-
 # Test client executable
 add_executable(TestClient test_client.cpp)
 target_link_libraries(TestClient PRIVATE xinput)

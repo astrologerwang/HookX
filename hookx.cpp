@@ -4,14 +4,16 @@
 #include <string>
 #include <filesystem>
 #include <iostream>
+#include <fstream>
 
 DWORD GetProcessIdByName(const std::wstring& processName) {
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (hSnapshot == INVALID_HANDLE_VALUE) return 0;
-    
+    if (hSnapshot == INVALID_HANDLE_VALUE)
+        return 0;
+
     PROCESSENTRY32W pe32;
     pe32.dwSize = sizeof(PROCESSENTRY32W);
-    
+
     if (Process32FirstW(hSnapshot, &pe32)) {
         do {
             if (processName == pe32.szExeFile) {
@@ -20,7 +22,7 @@ DWORD GetProcessIdByName(const std::wstring& processName) {
             }
         } while (Process32NextW(hSnapshot, &pe32));
     }
-    
+
     CloseHandle(hSnapshot);
     return 0;
 }
@@ -31,63 +33,82 @@ bool InjectDLL(DWORD processId, const std::string& dllPath) {
         fmt::print("Failed to open process. Error: {}\n", GetLastError());
         return false;
     }
-    
+
     // Allocate memory in target process
-    LPVOID pDllPath = VirtualAllocEx(hProcess, 0, dllPath.size() + 1, 
-                                     MEM_COMMIT, PAGE_READWRITE);
+    LPVOID pDllPath = VirtualAllocEx(hProcess, 0, dllPath.size() + 1,
+        MEM_COMMIT, PAGE_READWRITE);
     if (!pDllPath) {
         fmt::print("Failed to allocate memory in target process\n");
         CloseHandle(hProcess);
         return false;
     }
-    
+
     // Write DLL path to target process
     WriteProcessMemory(hProcess, pDllPath, dllPath.c_str(), dllPath.size() + 1, 0);
-    
+
     // Create remote thread to load DLL
-    HANDLE hThread = CreateRemoteThread(hProcess, 0, 0, 
-                                        (LPTHREAD_START_ROUTINE)LoadLibraryA, 
-                                        pDllPath, 0, 0);
+    HANDLE hThread = CreateRemoteThread(hProcess, 0, 0,
+        (LPTHREAD_START_ROUTINE)LoadLibraryA,
+        pDllPath, 0, 0);
     if (!hThread) {
         fmt::print("Failed to create remote thread. Error: {}\n", GetLastError());
         VirtualFreeEx(hProcess, pDllPath, 0, MEM_RELEASE);
         CloseHandle(hProcess);
         return false;
     }
-    
+
     // Wait for injection to complete
     WaitForSingleObject(hThread, INFINITE);
-    
+
     // Check if LoadLibrary succeeded
     DWORD exitCode;
     GetExitCodeThread(hThread, &exitCode);
-    
+
     // Cleanup
     VirtualFreeEx(hProcess, pDllPath, 0, MEM_RELEASE);
     CloseHandle(hThread);
     CloseHandle(hProcess);
-    
-    return exitCode != 0;  // LoadLibrary returns module handle (non-zero) on success
+
+    return exitCode != 0; // LoadLibrary returns module handle (non-zero) on success
+}
+
+// Function to write addresses to communication file
+void WriteAddressesToFile(uintptr_t cameraForwardAddr) {
+    std::ofstream addressFile("D:\\temp\\hookx_addresses.txt");
+    if (addressFile.is_open()) {
+        if (cameraForwardAddr != 0) {
+            addressFile << "g_cameraForward=" << std::hex << cameraForwardAddr << std::endl;
+        }
+        addressFile.close();
+
+        if (cameraForwardAddr != 0) {
+            fmt::print("Address written to communication file:\n");
+            fmt::print("  g_cameraForward: 0x{:X}\n", cameraForwardAddr);
+            fmt::print("  g_position will be auto-set to: 0x{:X} (g_cameraForward + 16)\n", cameraForwardAddr + 16);
+        }
+    } else {
+        fmt::print("ERROR: Could not write address to communication file!\n");
+    }
 }
 
 int main() {
     fmt::print("HookX - XInput Controller Hook for Elden Ring\n");
     fmt::print("=============================================\n");
     fmt::print("This tool injects a hook DLL into Elden Ring to provide automatic controller input.\n\n");
-    
+
     // Create temp directory for logs
     CreateDirectoryA("D:\\temp", NULL);
-    
+
     // Get the current executable directory
     char exePath[MAX_PATH];
     GetModuleFileNameA(NULL, exePath, MAX_PATH);
     std::filesystem::path exeDir = std::filesystem::path(exePath).parent_path();
-    
+
     // Build DLL path
     std::string dllPath = (exeDir / "hook_dll.dll").string();
-    
+
     fmt::print("Looking for hook DLL at: {}\n", dllPath);
-    
+
     // Check if DLL exists
     if (!std::filesystem::exists(dllPath)) {
         fmt::print("ERROR: hook_dll.dll not found!\n");
@@ -96,13 +117,13 @@ int main() {
         std::cin.get();
         return 1;
     }
-    
+
     fmt::print("Looking for Elden Ring process (eldenring.exe)...\n");
-    
+
     DWORD processId = 0;
     int attempts = 0;
     const int maxAttempts = 30; // Try for 30 seconds
-    
+
     while (processId == 0 && attempts < maxAttempts) {
         processId = GetProcessIdByName(L"eldenring.exe");
         if (processId == 0) {
@@ -111,7 +132,7 @@ int main() {
             attempts++;
         }
     }
-    
+
     if (processId == 0) {
         fmt::print("ERROR: Elden Ring process not found after {} seconds!\n", maxAttempts);
         fmt::print("Make sure Elden Ring is running.\n");
@@ -119,24 +140,60 @@ int main() {
         std::cin.get();
         return 1;
     }
-    
+
     fmt::print("Found Elden Ring process with PID: {}\n", processId);
     fmt::print("Attempting to inject hook DLL...\n");
-    
+
     if (InjectDLL(processId, dllPath)) {
         fmt::print("SUCCESS: Hook DLL injected into Elden Ring!\n\n");
         fmt::print("Hook is now active. The system will:\n");
         fmt::print("1. Simulate a controller if none is connected\n");
         fmt::print("2. Enhance real controller input if one is connected\n");
         fmt::print("3. Generate circular stick movements automatically\n\n");
-        fmt::print("Check D:\\temp\\hookx_log.txt for hook activity.\n\n");
-        fmt::print("Press Enter to exit (this will NOT remove the hook)...\n");
+        fmt::print("Check C:\\temp\\hookx_log.txt for hook activity.\n\n");
+
+        // Ask user for pointer inputs
+        fmt::print("=== Memory Address Configuration ===\n");
+        fmt::print("You can now set the memory address for the camera forward vector.\n");
+        fmt::print("The position address will be automatically calculated as cameraForward + 16 bytes.\n");
+        fmt::print("The DLL will check for updates every 500ms.\n\n");
+
+        uintptr_t cameraForwardAddr = 0;
+
+        // Get g_cameraForward address
+        fmt::print("Enter g_cameraForward address (hex, e.g., 0x12345678) or press Enter to skip: ");
+        std::string cameraInput;
+        std::getline(std::cin, cameraInput);
+
+        if (!cameraInput.empty()) {
+            try {
+                if (cameraInput.substr(0, 2) == "0x" || cameraInput.substr(0, 2) == "0X") {
+                    cameraForwardAddr = std::stoull(cameraInput, nullptr, 16);
+                } else {
+                    cameraForwardAddr = std::stoull(cameraInput, nullptr, 16);
+                }
+                fmt::print("g_cameraForward address set to: 0x{:X}\n", cameraForwardAddr);
+            } catch (const std::exception& e) {
+                fmt::print("Invalid address format for g_cameraForward: {}\n", e.what());
+            }
+        }
+
+        // Write address to communication file
+        if (cameraForwardAddr != 0) {
+            WriteAddressesToFile(cameraForwardAddr);
+            fmt::print("\nAddress sent to hook DLL via communication file.\n");
+            fmt::print("The DLL will automatically pick up this address within 500ms.\n");
+        } else {
+            fmt::print("\nNo address provided. The DLL will continue with nullptr values.\n");
+        }
+
+        fmt::print("\nPress Enter to exit (this will NOT remove the hook)...\n");
     } else {
         fmt::print("ERROR: Failed to inject DLL into Elden Ring!\n");
         fmt::print("Make sure you're running as administrator.\n");
         fmt::print("Press Enter to exit...\n");
     }
-    
+
     std::cin.get();
     return 0;
 }
