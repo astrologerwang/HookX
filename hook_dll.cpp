@@ -5,6 +5,7 @@
 #include <cmath>
 #include <string>
 #include <exception>
+#include <chrono>
 
 // Original function pointer
 static DWORD(WINAPI* TrueXInputGetState)(DWORD dwUserIndex, XINPUT_STATE* pState) = XInputGetState;
@@ -14,21 +15,17 @@ static DWORD g_frameCounter = 0;
 static float g_stickRadius = 0.8f;
 static float g_rotationSpeed = 0.02f;
 static void* g_cameraForward = nullptr;
-static void* g_position = nullptr;
 static bool g_rotatingCamera = false;
 static bool g_lastYButtonState = false;
 
-static float g_positionX = 0.0f;
-static float g_positionY = 0.0f;
-static float g_positionZ = 0.0f;
-
-static float g_cameraForwardX = 0.0f;
-static float g_cameraForwardY = 0.0f;
-static float g_cameraForwardZ = 0.0f;
-
 static float g_centerX = 12.6f;
 static float g_centerY = 0.0f;
-static float g_centerZ = -15.0f;
+static float g_centerZ = 17.0f;
+
+static float g_thumb_L_X = 0.5f;
+static float g_thumb_L_Y = 0.0f;
+static float g_thumb_R_X = -0.3f;
+static float g_thumb_R_Y = 0.0f;
 
 // Timing for periodic logging
 static DWORD g_lastLogTime = 0;
@@ -45,67 +42,20 @@ void LogMessage(const char* message) {
     }
 }
 
-// Function to safely log g_cameraForward value
-void LogCameraForwardValue() {
-    char logBuffer[512];
-
-    if (g_cameraForward == nullptr) {
-        sprintf_s(logBuffer, "[CAMERA LOG] g_cameraForward is nullptr");
-        LogMessage(logBuffer);
-        return;
-    }
-
-    // Try to safely read the value pointed to by g_cameraForward
-    __try {
-        // Assuming g_cameraForward points to a float (or float array)
-        float* cameraPtr = static_cast<float*>(g_cameraForward);
-        sprintf_s(logBuffer, "[CAMERA LOG] g_cameraForward: 0x%p -> Value: %.6f",
-            g_cameraForward, *cameraPtr);
-        LogMessage(logBuffer);
-
-        // If it's a 3D vector (X, Y, Z), log all three values
-        sprintf_s(logBuffer, "[CAMERA LOG] Camera Forward Vector: X=%.6f, Y=%.6f, Z=%.6f",
-            cameraPtr[0], cameraPtr[1], cameraPtr[2]);
-        LogMessage(logBuffer);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        sprintf_s(logBuffer, "[CAMERA LOG] g_cameraForward: 0x%p -> Cannot read value (Access Violation)",
-            g_cameraForward);
-        LogMessage(logBuffer);
-    }
-}
-
-// Function to safely log g_position value
-void LogPositionValue() {
-    char logBuffer[512];
-
-    if (g_position == nullptr) {
-        sprintf_s(logBuffer, "[POSITION LOG] g_position is nullptr");
-        LogMessage(logBuffer);
-        return;
-    }
-
-    // Try to safely read the value pointed to by g_position
-    __try {
-        // Assuming g_position points to a float array (X, Y, Z)
-        float* positionPtr = static_cast<float*>(g_position);
-        sprintf_s(logBuffer, "[POSITION LOG] g_position: 0x%p -> Position: X=%.6f, Y=%.6f, Z=%.6f",
-            g_position, positionPtr[0], positionPtr[1], positionPtr[2]);
-        LogMessage(logBuffer);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        sprintf_s(logBuffer, "[POSITION LOG] g_position: 0x%p -> Cannot read value (Access Violation)",
-            g_position);
-        LogMessage(logBuffer);
-    }
-}
-
 // Function to check for address updates from hookx.exe
 void CheckForAddressUpdates() {
     std::ifstream addressFile("D:\\temp\\hookx_addresses.txt");
     if (!addressFile.is_open()) {
+        static bool hasLoggedFileNotFound = false;
+        if (!hasLoggedFileNotFound) {
+            LogMessage("[ADDRESS CHECK] Address file not found: D:\\temp\\hookx_addresses.txt");
+            hasLoggedFileNotFound = true;
+        }
         return; // File doesn't exist yet, that's okay
     }
 
     std::string line;
+    bool foundAddress = false;
     while (std::getline(addressFile, line)) {
         if (line.find("g_cameraForward=") == 0) {
             std::string addressStr = line.substr(16); // Skip "g_cameraForward="
@@ -113,23 +63,37 @@ void CheckForAddressUpdates() {
                 uintptr_t newAddress = std::stoull(addressStr, nullptr, 16);
                 void* newPtr = reinterpret_cast<void*>(newAddress);
 
+                if (newAddress == 0) {
+                    static bool hasLoggedZeroAddress = false;
+                    if (!hasLoggedZeroAddress) {
+                        LogMessage("[ADDRESS CHECK] Found zero address in file - please update with real address");
+                        hasLoggedZeroAddress = true;
+                    }
+                    foundAddress = true;
+                    continue;
+                }
+
                 if (newPtr != g_cameraForward) {
                     g_cameraForward = newPtr;
-                    // Automatically set g_position as g_cameraForward + 16 bytes
-                    g_position = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(g_cameraForward) + 16);
-
                     char logBuffer[256];
-                    sprintf_s(logBuffer, "[ADDRESS UPDATE] g_cameraForward set to: 0x%p", g_cameraForward);
-                    LogMessage(logBuffer);
-                    sprintf_s(logBuffer, "[ADDRESS UPDATE] g_position auto-set to: 0x%p (g_cameraForward + 16)", g_position);
+                    sprintf_s(logBuffer, "[ADDRESS UPDATE] g_cameraForward auto-loaded from file: 0x%p", g_cameraForward);
                     LogMessage(logBuffer);
                 }
+                foundAddress = true;
             } catch (const std::exception&) {
-                LogMessage("[ADDRESS UPDATE] Failed to parse g_cameraForward address");
+                LogMessage("[ADDRESS UPDATE] Failed to parse g_cameraForward address from file");
             }
         }
-        // Remove the g_position parsing since it's now calculated automatically
     }
+
+    if (!foundAddress) {
+        static bool hasLoggedNoAddress = false;
+        if (!hasLoggedNoAddress) {
+            LogMessage("[ADDRESS CHECK] No g_cameraForward address found in file");
+            hasLoggedNoAddress = true;
+        }
+    }
+
     addressFile.close();
 }
 
@@ -139,28 +103,69 @@ SHORT FloatToStick(float value) {
     return static_cast<SHORT>(value * 32767.0f);
 }
 
-void GenerateCircularStickMovement(XINPUT_GAMEPAD& gamepad) {
+void GenerateCircularMovement(XINPUT_GAMEPAD& gamepad) {
+
+    if (g_cameraForward == nullptr) {
+        return;
+    }
+
+    float* cameraPtr = static_cast<float*>(g_cameraForward);
+    float forwardX = *cameraPtr;
+    float forwardY = cameraPtr[1];
+    float forwardZ = cameraPtr[2];
+    float posX = cameraPtr[4];
+    float posY = cameraPtr[5];
+    float posZ = cameraPtr[6];
+
+    float curForwardX = posX - g_centerX;
+    float curForwardZ = posZ - g_centerZ;
+    float dot = (curForwardX * forwardZ) - (curForwardZ * forwardX);
+    float distance = sqrt(curForwardX * curForwardX + curForwardZ * curForwardZ);
+
+    auto now = std::chrono::steady_clock::now();
+    auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+    int currentTimeMs = static_cast<int>(nowMs);
+
     if (g_rotatingCamera) {
-        gamepad.sThumbLX = 0;
-        gamepad.sThumbLY = 0;
-        gamepad.sThumbRX = FloatToStick(1.0f);
-        gamepad.sThumbRY = 0;
+        if (currentTimeMs % 2 == 0) {
+            if (dot < -0) {
+                g_thumb_R_X += 0.001f * -dot;
+            } else if (dot > 0) {
+                g_thumb_R_X -= 0.001f * dot;
+            }
+        }
+        // if (forwardY > -0.6) {
+        //     g_thumb_R_Y -= 0.001f * (forwardY + 0.6f);
+        // } else if (forwardY < -0.6) {
+        //     g_thumb_R_Y += 0.001f * -(forwardY + 0.6f);
+        // }
+        // if (distance > 30) {
+        //     g_thumb_L_Y += 0.0001f * (distance - 30);
+        // } else if (distance < 30) {
+        //     g_thumb_L_Y -= 0.0001f * (30 - distance);
+        // }
+        if (currentTimeMs % 2 == 1) {
+            if (distance > 30) {
+                g_thumb_L_X -= 0.0001f * (distance - 30);
+            } else if (distance < 30) {
+                g_thumb_L_X += 0.0001f * (30 - distance);
+            }
+            if (g_thumb_L_X < 0.4f) {
+                g_thumb_L_X = 0.4f;
+            } else if (g_thumb_L_X > 0.6f) {
+                g_thumb_L_X = 0.6f;
+            }
+        }
+        gamepad.sThumbLX = FloatToStick(g_thumb_L_X);
+        gamepad.sThumbLY = FloatToStick(g_thumb_L_Y);
+        gamepad.sThumbRX = FloatToStick(g_thumb_R_X);
+        gamepad.sThumbRY = FloatToStick(g_thumb_R_Y);
     }
 }
 
 DWORD WINAPI HookedXInputGetState(DWORD dwUserIndex, XINPUT_STATE* pState) {
-    char logBuffer[256];
-    sprintf_s(logBuffer, "XInputGetState called for controller %d (g_cameraForward: 0x%p", dwUserIndex, g_cameraForward);
-    LogMessage(logBuffer);
 
     DWORD currentTime = GetTickCount();
-
-    // Periodic logging of g_cameraForward value (every 1 second)
-    if (currentTime - g_lastLogTime >= LOG_INTERVAL_MS) {
-        LogCameraForwardValue();
-        LogPositionValue();
-        g_lastLogTime = currentTime;
-    }
 
     // Check for address updates from hookx.exe (every 500ms)
     if (currentTime - g_lastAddressCheckTime >= ADDRESS_CHECK_INTERVAL_MS) {
@@ -175,34 +180,23 @@ DWORD WINAPI HookedXInputGetState(DWORD dwUserIndex, XINPUT_STATE* pState) {
 
         if (currentYButtonState && !g_lastYButtonState) {
             g_rotatingCamera = !g_rotatingCamera;
-            sprintf_s(logBuffer, "Y button pressed! Continuous leftY input: %s",
-                g_rotatingCamera ? "ENABLED" : "DISABLED");
-            LogMessage(logBuffer);
         }
 
         g_lastYButtonState = currentYButtonState;
     }
 
     if (g_enableAutoController && dwUserIndex == 0) {
-        sprintf_s(logBuffer, "Force simulating controller %d - Frame %d (Real controller: %s, Continuous leftY: %s)",
-            dwUserIndex, g_frameCounter, (result == ERROR_SUCCESS) ? "Connected" : "Not connected",
-            g_rotatingCamera ? "ON" : "OFF");
-        LogMessage(logBuffer);
 
         ZeroMemory(pState, sizeof(XINPUT_STATE));
         pState->dwPacketNumber = g_frameCounter;
 
-        GenerateCircularStickMovement(pState->Gamepad);
+        GenerateCircularMovement(pState->Gamepad);
 
         g_frameCounter++;
         return ERROR_SUCCESS;
     }
 
     if (result == ERROR_SUCCESS && g_enableAutoController) {
-        sprintf_s(logBuffer, "Real controller %d detected, enhancing input - Frame %d (Continuous leftY: %s)",
-            dwUserIndex, g_frameCounter, g_rotatingCamera ? "ON" : "OFF");
-        LogMessage(logBuffer);
-
         if (g_rotatingCamera) {
 
             pState->Gamepad.sThumbLX = 0;

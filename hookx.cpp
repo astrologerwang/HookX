@@ -150,44 +150,51 @@ int main() {
         fmt::print("1. Simulate a controller if none is connected\n");
         fmt::print("2. Enhance real controller input if one is connected\n");
         fmt::print("3. Generate circular stick movements automatically\n\n");
-        fmt::print("Check C:\\temp\\hookx_log.txt for hook activity.\n\n");
+        fmt::print("Check D:\\temp\\hookx_log.txt for hook activity.\n\n");
 
-        // Ask user for pointer inputs
-        fmt::print("=== Memory Address Configuration ===\n");
-        fmt::print("You can now set the memory address for the camera forward vector.\n");
-        fmt::print("The position address will be automatically calculated as cameraForward + 16 bytes.\n");
-        fmt::print("The DLL will check for updates every 500ms.\n\n");
+        // Automatically configure memory address
+        fmt::print("=== Automatic Address Configuration ===\n");
+        fmt::print("The DLL will automatically read the camera forward address from D:\\temp\\hookx_addresses.txt\n");
+        fmt::print("Make sure the address file contains the correct g_cameraForward address.\n\n");
 
-        uintptr_t cameraForwardAddr = 0;
+        // Check if address file exists and read current address
+        std::ifstream checkFile("D:\\temp\\hookx_addresses.txt");
+        bool hasExistingAddress = false;
+        uintptr_t existingAddress = 0;
 
-        // Get g_cameraForward address
-        fmt::print("Enter g_cameraForward address (hex, e.g., 0x12345678) or press Enter to skip: ");
-        std::string cameraInput;
-        std::getline(std::cin, cameraInput);
-
-        if (!cameraInput.empty()) {
-            try {
-                if (cameraInput.substr(0, 2) == "0x" || cameraInput.substr(0, 2) == "0X") {
-                    cameraForwardAddr = std::stoull(cameraInput, nullptr, 16);
-                } else {
-                    cameraForwardAddr = std::stoull(cameraInput, nullptr, 16);
+        if (checkFile.is_open()) {
+            std::string line;
+            while (std::getline(checkFile, line)) {
+                if (line.find("g_cameraForward=") == 0) {
+                    std::string addressStr = line.substr(16);
+                    try {
+                        existingAddress = std::stoull(addressStr, nullptr, 16);
+                        hasExistingAddress = true;
+                        fmt::print("Found existing address in file: 0x{:X}\n", existingAddress);
+                    } catch (const std::exception&) {
+                        fmt::print("Invalid address format in existing file.\n");
+                    }
+                    break;
                 }
-                fmt::print("g_cameraForward address set to: 0x{:X}\n", cameraForwardAddr);
-            } catch (const std::exception& e) {
-                fmt::print("Invalid address format for g_cameraForward: {}\n", e.what());
+            }
+            checkFile.close();
+        }
+
+        if (!hasExistingAddress) {
+            fmt::print("No valid address file found. Creating default address file.\n");
+            fmt::print("Please edit D:\\temp\\hookx_addresses.txt with the correct address.\n");
+
+            // Create a default address file with placeholder
+            std::ofstream defaultFile("D:\\temp\\hookx_addresses.txt");
+            if (defaultFile.is_open()) {
+                defaultFile << "g_cameraForward=0" << std::endl;
+                defaultFile.close();
+                fmt::print("Created default address file. Please update it with the real address.\n");
             }
         }
 
-        // Write address to communication file
-        if (cameraForwardAddr != 0) {
-            WriteAddressesToFile(cameraForwardAddr);
-            fmt::print("\nAddress sent to hook DLL via communication file.\n");
-            fmt::print("The DLL will automatically pick up this address within 500ms.\n");
-        } else {
-            fmt::print("\nNo address provided. The DLL will continue with nullptr values.\n");
-        }
-
-        fmt::print("\nPress Enter to exit (this will NOT remove the hook)...\n");
+        fmt::print("\nThe DLL will automatically monitor the address file for updates.\n");
+        fmt::print("Press Enter to exit (this will NOT remove the hook)...\n");
     } else {
         fmt::print("ERROR: Failed to inject DLL into Elden Ring!\n");
         fmt::print("Make sure you're running as administrator.\n");
