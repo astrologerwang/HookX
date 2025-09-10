@@ -5,7 +5,6 @@
 #include <cmath>
 #include <string>
 #include <exception>
-#include <chrono>
 
 // Original function pointer
 static DWORD(WINAPI* TrueXInputGetState)(DWORD dwUserIndex, XINPUT_STATE* pState) = XInputGetState;
@@ -18,14 +17,14 @@ static void* g_cameraForward = nullptr;
 static bool g_rotatingCamera = false;
 static bool g_lastYButtonState = false;
 
-static float g_centerX = 12.6f;
+static float g_centerX = 12.5f;
 static float g_centerY = 0.0f;
-static float g_centerZ = 17.0f;
+static float g_centerZ = 16.83f;
 
-static float g_thumb_L_X = 0.5f;
-static float g_thumb_L_Y = 0.0f;
-static float g_thumb_R_X = -0.3f;
-static float g_thumb_R_Y = 0.0f;
+static float g_original_thumb_L_X = 0.5f;
+static float g_original_thumb_L_Y = 0.0f;
+static float g_original_thumb_R_X = -0.3f;
+static float g_original_thumb_R_Y = 0.0f;
 
 // Timing for periodic logging
 static DWORD g_lastLogTime = 0;
@@ -109,8 +108,13 @@ void GenerateCircularMovement(XINPUT_GAMEPAD& gamepad) {
         return;
     }
 
+    float thumb_L_X = g_original_thumb_L_X;
+    float thumb_L_Y = g_original_thumb_L_Y;
+    float thumb_R_X = g_original_thumb_R_X;
+    float thumb_R_Y = g_original_thumb_R_Y;
+
     float* cameraPtr = static_cast<float*>(g_cameraForward);
-    float forwardX = *cameraPtr;
+    float forwardX = cameraPtr[0];
     float forwardY = cameraPtr[1];
     float forwardZ = cameraPtr[2];
     float posX = cameraPtr[4];
@@ -122,44 +126,14 @@ void GenerateCircularMovement(XINPUT_GAMEPAD& gamepad) {
     float dot = (curForwardX * forwardZ) - (curForwardZ * forwardX);
     float distance = sqrt(curForwardX * curForwardX + curForwardZ * curForwardZ);
 
-    auto now = std::chrono::steady_clock::now();
-    auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-    int currentTimeMs = static_cast<int>(nowMs);
-
     if (g_rotatingCamera) {
-        if (currentTimeMs % 2 == 0) {
-            if (dot < -0) {
-                g_thumb_R_X += 0.001f * -dot;
-            } else if (dot > 0) {
-                g_thumb_R_X -= 0.001f * dot;
-            }
-        }
-        // if (forwardY > -0.6) {
-        //     g_thumb_R_Y -= 0.001f * (forwardY + 0.6f);
-        // } else if (forwardY < -0.6) {
-        //     g_thumb_R_Y += 0.001f * -(forwardY + 0.6f);
-        // }
-        // if (distance > 30) {
-        //     g_thumb_L_Y += 0.0001f * (distance - 30);
-        // } else if (distance < 30) {
-        //     g_thumb_L_Y -= 0.0001f * (30 - distance);
-        // }
-        if (currentTimeMs % 2 == 1) {
-            if (distance > 30) {
-                g_thumb_L_X -= 0.0001f * (distance - 30);
-            } else if (distance < 30) {
-                g_thumb_L_X += 0.0001f * (30 - distance);
-            }
-            if (g_thumb_L_X < 0.4f) {
-                g_thumb_L_X = 0.4f;
-            } else if (g_thumb_L_X > 0.6f) {
-                g_thumb_L_X = 0.6f;
-            }
-        }
-        gamepad.sThumbLX = FloatToStick(g_thumb_L_X);
-        gamepad.sThumbLY = FloatToStick(g_thumb_L_Y);
-        gamepad.sThumbRX = FloatToStick(g_thumb_R_X);
-        gamepad.sThumbRY = FloatToStick(g_thumb_R_Y);
+
+        thumb_R_X = g_original_thumb_R_X - 0.01f * dot;
+
+        gamepad.sThumbLX = FloatToStick(thumb_L_X);
+        gamepad.sThumbLY = FloatToStick(thumb_L_Y);
+        gamepad.sThumbRX = FloatToStick(thumb_R_X);
+        gamepad.sThumbRY = FloatToStick(thumb_R_Y);
     }
 }
 
