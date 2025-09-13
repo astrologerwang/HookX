@@ -1,6 +1,0 @@
-Test file to demonstrate the address communication format:
-
-g_cameraForward=7FF123456789
-g_position=7FF987654321
-
-This is the format that hookx.exe will write and hook_dll.dll will read.

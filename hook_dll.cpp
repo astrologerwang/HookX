@@ -11,7 +11,6 @@ static DWORD(WINAPI* TrueXInputGetState)(DWORD dwUserIndex, XINPUT_STATE* pState
 
 static bool g_enableAutoController = true;
 static DWORD g_frameCounter = 0;
-static float g_stickRadius = 0.8f;
 static float g_rotationSpeed = 0.02f;
 static void* g_cameraForward = nullptr;
 static bool g_rotatingCamera = false;
@@ -21,7 +20,7 @@ static float g_centerX = 12.5f;
 static float g_centerY = 0.0f;
 static float g_centerZ = 16.83f;
 
-static float g_original_thumb_L_X = 0.5f;
+static float g_original_thumb_L_X = 0.6f;
 static float g_original_thumb_L_Y = 0.0f;
 static float g_original_thumb_R_X = -0.3f;
 static float g_original_thumb_R_Y = 0.0f;
